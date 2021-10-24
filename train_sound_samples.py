@@ -2,111 +2,126 @@
 
 import torch
 import numpy as np
-from sklearn.datasets import make_blobs
 import matplotlib.pyplot as plt
-import time
 
-#DEFINE YOUR DEVICE
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+class NeuralNetwork:
+    def __init__(self, learning_rate):
+        self.weights = np.array([np.random.randn(), np.random.randn()])
+        self.bias = np.random.randn()
+        self.learning_rate = learning_rate
 
-print(device) #if cpu, go Runtime-> Change runtime type-> Hardware accelerator GPU -> Save -> Redo previous stepspip
+    def _sigmoid(self, x):
+        return 1 / (1 + np.exp(-x))
 
-#CREATE A RANDOM DATASET
-centers = [[1, 1], [1, -1], [-1, -1], [-1, 1]] #center of each class
-cluster_std=0.4 #standard deviation of random gaussian samples
+    def _sigmoid_deriv(self, x):
+        return self._sigmoid(x) * (1 - self._sigmoid(x))
 
-x_train, y_train = make_blobs(n_samples=1000, centers=centers, n_features=2, cluster_std=cluster_std, shuffle=True)
-y_train[y_train==2] = 0 #make this an xor problem
-y_train[y_train==3] = 1 #make this an xor problem
-x_train = torch.FloatTensor(x_train)
-y_train = torch.FloatTensor(y_train)
+    def predict(self, input_vector):
+        layer_1 = np.dot(input_vector, self.weights) + self.bias
+        layer_2 = self._sigmoid(layer_1)
+        prediction = layer_2
+        return prediction
 
-x_val, y_val = make_blobs(n_samples=100, centers=centers, n_features=2, cluster_std=cluster_std, shuffle=True)
-y_val[y_val==2] = 0 #make this an xor problem
-y_val[y_val==3] = 1 #make this an xor problem
-x_val = torch.FloatTensor(x_val)
-y_val = torch.FloatTensor(y_val)
+    def _compute_gradients(self, input_vector, target):
+        layer_1 = np.dot(input_vector, self.weights) + self.bias
+        layer_2 = self._sigmoid(layer_1)
+        prediction = layer_2
 
-#DEFINE NEURAL NETWORK MODEL
-class FullyConnected(torch.nn.Module):
-  def __init__(self, input_size, hidden_size, num_classes):
-    super(FullyConnected, self).__init__()
-    self.input_size = input_size
-    self.hidden_size  = hidden_size
-    self.fc1 = torch.nn.Linear(self.input_size, self.hidden_size)  
-    self.fc2 = torch.nn.Linear(self.hidden_size, num_classes)
-    self.relu = torch.nn.ReLU()
-    self.sigmoid = torch.nn.Sigmoid()
-  def forward(self, x):
-    hidden = self.fc1(x)
-    relu = self.relu(hidden)
-    output = self.fc2(relu)
-    return output
+        derror_dprediction = 2 * (prediction - target)
+        dprediction_dlayer1 = self._sigmoid_deriv(layer_1)
+        dlayer1_dbias = 1
+        dlayer1_dweights = (0 * self.weights) + (1 * input_vector)
+
+        derror_dbias = (
+            derror_dprediction * dprediction_dlayer1 * dlayer1_dbias
+        )
+        derror_dweights = (
+            derror_dprediction * dprediction_dlayer1 * dlayer1_dweights
+        )
+
+        return derror_dbias, derror_dweights
+
+    def _update_parameters(self, derror_dbias, derror_dweights):
+        self.bias = self.bias - (derror_dbias * self.learning_rate)
+        self.weights = self.weights - (
+            derror_dweights * self.learning_rate
+        )
+    def train(self, input_vectors, targets, iterations):
+
+        cumulative_errors = []
+
+        for current_iteration in range(iterations):
+
+            # Pick a data instance at random
+
+            random_data_index = np.random.randint(len(input_vectors))
 
 
-#CREATE MODEL
-input_size = 2
-hidden_size = 64
-num_classes = 1
+            input_vector = input_vectors[random_data_index]
 
-model = FullyConnected(input_size, hidden_size, num_classes)
-model.to(device)
+            target = targets[random_data_index]
 
 
-#DEFINE LOSS FUNCTION AND OPTIMIZER
-learning_rate = 0.001
-momentum = 0
+            # Compute the gradients and update the weights
 
-loss_fun = torch.nn.MSELoss()
-optimizer = torch.optim.SGD(model.parameters(), lr = learning_rate, momentum = momentum)
+            derror_dbias, derror_dweights = self._compute_gradients(
 
-#TRAIN THE MODEL
-model.train()
-epoch = 300
-x_train = x_train.to(device)
-y_train = y_train.to(device)
+                input_vector, target
 
-loss_values = np.zeros(epoch)
+            )
 
-for i in range(epoch):
-    optimizer.zero_grad()    
-    y_pred = model(x_train)    # forward
-    #reshape y_pred from (n_samples,1) to (n_samples), so y_pred and y_train have the same shape
-    y_pred = y_pred.reshape(y_pred.shape[0])
-    loss = loss_fun(y_pred, y_train)
-   
-    loss_values[i] = loss.item()
-    print('Epoch {}: train loss: {}'.format(i, loss.item()))    
-    loss.backward() #backward
-    optimizer.step()   
 
-#PLOT THE LEARNING CURVE
-plt.plot(loss_values)
-plt.title('Learning Curve')
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-plt.grid('on')
+            self._update_parameters(derror_dbias, derror_dweights)
 
-print(loss_values)
-#TEST THE MODEL
-model.eval()
 
-x_val = x_val.to(device)
-y_val = y_val.to(device)
+            # Measure the cumulative error for all the instances
 
-y_pred = model(x_val)
-#reshape y_pred from (n_samples,1) to (n_samples), so y_pred and y_val have the same shape
-y_pred = y_pred.reshape(y_pred.shape[0])
-after_train = loss_fun(y_pred, y_val) 
-print('Validation loss after Training' , after_train.item())
+            if current_iteration % 100 == 0:
 
-correct=0
-total=0
-for i in range(y_pred.shape[0]):
-  if y_val[i]==torch.round(y_pred[i]):
-    correct += 1
-  total +=1
+                cumulative_error = 0
 
-print('Validation accuracy: %.2f%%' %((100*correct)//(total)))  
+                # Loop through all the instances to measure the error
+
+                for data_instance_index in range(len(input_vectors)):
+
+                    data_point = input_vectors[data_instance_index]
+
+                    target = targets[data_instance_index]
+
+
+                    prediction = self.predict(data_point)
+
+                    error = np.square(prediction - target)
+
+
+                    cumulative_error = cumulative_error + error
+
+                cumulative_errors.append(cumulative_error)
+
+
+        return cumulative_errors
+
+input_vectors = np.array(
+       [
+           [3, 1.5],
+           [2, 1],
+           [4, 1.5],
+           [3, 4],
+           [3.5, 0.5],
+           [2, 0.5],
+           [5.5, 1],
+           [1, 1],
+       ]
+   )
+
+targets = np.array([0, 1, 0, 1, 0, 1, 1, 0])
+learning_rate = 0.01
+neural_network = NeuralNetwork(learning_rate)
+training_error = neural_network.train(input_vectors, targets, 100000)
+plt.plot(training_error)
+plt.xlabel("Iterations")
+plt.ylabel("Error for all training instances")
+plt.savefig("cumulative_error.png")
+plt.show()
 
 
